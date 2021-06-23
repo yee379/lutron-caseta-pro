@@ -1,15 +1,8 @@
 """
-Interface module for Lutron Caseta Smart Bridge PRO
-and Ra2 Select Main Repeater.
+Interface module for Lutron Caseta Smart Bridge PRO and Ra2 Select Main Repeater.
 
 This module uses the Telnet interface which must be
 enabled through the integration menu in the mobile app.
-
-Original Author: jhanssen
-Source: https://github.com/jhanssen/home-assistant/tree/caseta-0.40
-
-Additional Authors:
-upsert (https://github.com/upsert)
 """
 
 import asyncio
@@ -41,7 +34,7 @@ async def async_load_integration_report(fname):
     to an area.
     """
     devices = []
-    with open(fname, encoding='utf-8') as conf_file:
+    with open(fname, encoding="utf-8") as conf_file:
         integration_report = json.load(conf_file)
         # _LOGGER.debug(integration)
         if "LIPIdList" in integration_report:
@@ -55,16 +48,19 @@ async def async_load_integration_report(fname):
                     if device["ID"] == 1 and "Buttons" in device:
                         _process_scenes(devices, device)
                     elif device["ID"] != 1 and "Buttons" in device:
-                        device_obj = {CONF_ID: device["ID"],
-                                      CONF_NAME: device["Name"],
-                                      CONF_TYPE: "sensor",
-                                      CONF_BUTTONS: [b["Number"] for b in device["Buttons"]]}
+                        device_obj = {
+                            CONF_ID: device["ID"],
+                            CONF_NAME: device["Name"],
+                            CONF_TYPE: "sensor",
+                            CONF_BUTTONS: [b["Number"] for b in device["Buttons"]],
+                        }
                         if "Area" in device and "Name" in device["Area"]:
                             device_obj[CONF_AREA_NAME] = device["Area"]["Name"]
                         devices.append(device_obj)
         else:
-            _LOGGER.warning("'LIPIdList' not found in the Integration Report."
-                            " No devices will be loaded.")
+            _LOGGER.warning(
+                "'LIPIdList' not found in the Integration Report. No devices will be loaded."
+            )
     return devices
 
 
@@ -72,9 +68,7 @@ def _process_zones(devices, integration_report):
     """Process zones and append devices."""
     for zone in integration_report["LIPIdList"]["Zones"]:
         # _LOGGER.debug(zone)
-        device_obj = {CONF_ID: zone["ID"],
-                      CONF_NAME: zone["Name"],
-                      CONF_TYPE: "light"}
+        device_obj = {CONF_ID: zone["ID"], CONF_NAME: zone["Name"], CONF_TYPE: "light"}
         if "Area" in zone and "Name" in zone["Area"]:
             device_obj[CONF_AREA_NAME] = zone["Area"]["Name"]
         devices.append(device_obj)
@@ -84,13 +78,15 @@ def _process_scenes(devices, device):
     """Process scenes and append devices."""
     for button in device["Buttons"]:
         if not button["Name"].startswith("Button "):
-            _LOGGER.info(
-                "Found scene %d, %s", button["Number"],
-                button["Name"])
-            devices.append({CONF_ID: device["ID"],
-                            CONF_NAME: button["Name"],
-                            CONF_SCENE_ID: button["Number"],
-                            CONF_TYPE: "scene"})
+            _LOGGER.info("Found scene %d, %s", button["Number"], button["Name"])
+            devices.append(
+                {
+                    CONF_ID: device["ID"],
+                    CONF_NAME: button["Name"],
+                    CONF_SCENE_ID: button["Number"],
+                    CONF_TYPE: "scene",
+                }
+            )
 
 
 # pylint: disable=too-many-instance-attributes
@@ -134,11 +130,12 @@ class Casetify:
         self.reader, self.writer = None, None
 
     def is_connected(self):
-        """Returns if the connection is open."""
+        """Return if the connection is open."""
         return self._state == Casetify.State.Opened
 
-    async def open(self, host, port=23, username=DEFAULT_USER,
-                   password=DEFAULT_PASSWORD):
+    async def open(
+        self, host, port=23, username=DEFAULT_USER, password=DEFAULT_PASSWORD
+    ):
         """Open a Telnet connection to Lutron bridge."""
         async with self._read_lock:
             async with self._write_lock:
@@ -155,7 +152,9 @@ class Casetify:
                 try:
                     connection = await asyncio.open_connection(host, port)
                 except OSError as err:
-                    _LOGGER.warning("Error opening connection to Lutron bridge: %s", err)
+                    _LOGGER.warning(
+                        "Error opening connection to Lutron bridge: %s", err
+                    )
                     self._state = Casetify.State.Closed
                     return
 
@@ -165,8 +164,10 @@ class Casetify:
                 # do login
                 await self._read_until(b"login: ")
                 self.writer.write(username + b"\r\n")
+                await self.writer.drain()
                 await self._read_until(b"password: ")
                 self.writer.write(password + b"\r\n")
+                await self.writer.drain()
                 await self._read_until(b"GNET> ")
 
                 self._state = Casetify.State.Opened
@@ -178,15 +179,19 @@ class Casetify:
                 # assume regular expression
                 match = value.search(self._read_buffer)
                 if match:
-                    self._read_buffer = self._read_buffer[match.end():]
+                    self._read_buffer = self._read_buffer[match.end() :]
                     return match
             else:
                 where = self._read_buffer.find(value)
                 if where != -1:
-                    self._read_buffer = self._read_buffer[where + len(value):]
+                    self._read_buffer = self._read_buffer[where + len(value) :]
                     return True
             try:
-                self._read_buffer += await self.reader.read(READ_SIZE)
+                read_data = await self.reader.read(READ_SIZE)
+                if not read_data:
+                    _LOGGER.warning("Empty read from Lutron bridge (clean disconnect)")
+                    return False
+                self._read_buffer += read_data
             except OSError as err:
                 _LOGGER.warning("Error reading from Lutron bridge: %s", err)
                 return False
@@ -201,17 +206,19 @@ class Casetify:
                 # 1 = mode, 2 = integration number,
                 # 3 = action number, 4 = value
                 try:
-                    return match.group(1).decode("utf-8"), \
-                           int(match.group(2)), int(match.group(3)), \
-                           float(match.group(4))
+                    return (
+                        match.group(1).decode("utf-8"),
+                        int(match.group(2)),
+                        int(match.group(3)),
+                        float(match.group(4)),
+                    )
                 except ValueError:
                     print("Exception in ", match.group(0))
         if match is False:
             # attempt to reconnect
             _LOGGER.info("Reconnecting to Lutron bridge %s", self._host)
             self._state = Casetify.State.Closed
-            await self.open(self._host, self._port, self._username,
-                            self._password)
+            await self.open(self._host, self._port, self._username, self._password)
         return None, None, None, None
 
     async def write(self, mode, integration, action, *args, value=None):
@@ -229,6 +236,7 @@ class Casetify:
                     data += ",{}".format(arg)
             try:
                 self.writer.write((data + "\r\n").encode())
+                await self.writer.drain()
             except OSError as err:
                 _LOGGER.warning("Error writing out to the Lutron bridge: %s", err)
 
@@ -236,13 +244,16 @@ class Casetify:
         """Query a device to get its current state."""
         if hasattr(action, "value"):
             action = action.value
-        _LOGGER.debug("Sending query %s, integration %s, action %s",
-                      mode, integration, action)
+        _LOGGER.debug(
+            "Sending query %s, integration %s, action %s", mode, integration, action
+        )
         async with self._write_lock:
             if self._state != Casetify.State.Opened:
                 return
-            self.writer.write("?{},{},{}\r\n".format(mode, integration,
-                                                     action).encode())
+            self.writer.write(
+                "?{},{},{}\r\n".format(mode, integration, action).encode()
+            )
+            await self.writer.drain()
 
     async def ping(self):
         """Ping the interface to keep the connection alive."""
@@ -250,3 +261,4 @@ class Casetify:
             if self._state != Casetify.State.Opened:
                 return
             self.writer.write(b"?SYSTEM,10\r\n")
+            await self.writer.drain()
